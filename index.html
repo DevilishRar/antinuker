@@ -1,670 +1,538 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
     <title>Anti-Nuker System</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: monospace;
+            white-space: pre;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+        }
+    </style>
 </head>
 <body>
-<pre>local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ServerStorage = game:GetService("ServerStorage")
-local ServerScriptService = game:GetService("ServerScriptService")
-local Workspace = game:GetService("Workspace")
-local Lighting = game:GetService("Lighting")
-local DataStoreService = game:GetService("DataStoreService")
-local HttpService = game:GetService("HttpService")
+-- Anti-Nuker System Core Logic
+-- Version 1.3.0
 
-if not _G.AntiNukerSystem then
-    _G.AntiNukerSystem = {
-        Running = false,
-        Version = "1.0.0",
-        LastUpdate = os.time(),
-        Connection = nil,
-        Connections = {},
-        ProtectedServices = {},
-        ObjectCreationLog = {},
-        ObjectDeletionLog = {},
-        BlacklistedStrings = {"nuke", "destroy", "delete", "bomb", "crash", "lag", "exploit", "hack", "server", "script", "flood", "spawn", "mass", "all", "kill"},
-        SuspiciousPatterns = {
-            "Server[%s_%-]*[Nn]uker?",
-            "[Nn]uker?[%s_%-]*[Ss]cript",
-            "[Ss]erver[%s_%-]*[Cc]rash",
-            "[Ll]ag[%s_%-]*[Ss]erver",
-            "[Mm]ass[%s_%-]*[Ss]pawn",
-            "[Dd]estroy[%s_%-]*[Aa]ll",
-            "[Ee]xploit[%s_%-]*[Ss]cript"
-        },
-        ProtectionSettings = {
-            MaxObjectCreationRate = 50,
-            CreationTimeWindow = 3,
-            MaxDeletionRate = 40, 
-            DeletionTimeWindow = 3,
-            MaxPropertyChanges = 30,
-            PropertyTimeWindow = 2,
-            CheckInterval = 0.5,
-            KickMessage = "Suspicious activity detected. You have been removed from the game.",
-            LogDetections = true,
-            AutoCleanup = true,
-            MonitorPropertyChanges = true,
-            PreventMassSpawning = true,
-            PreventMassDeletion = true,
-            PreventUnauthorizedScripts = true,
-            AllowedScriptCreators = {},
-            MaxChildrenPerInstance = 1000,
-            InstanceBlacklist = {
-                ["Fire"] = true,
-                ["Explosion"] = true,
-                ["Sparkles"] = true,
-                ["Smoke"] = true,
-                ["BloomEffect"] = true,
-                ["BlurEffect"] = true,
-                ["ColorCorrectionEffect"] = true,
-                ["Script"] = true,
-                ["LocalScript"] = true,
-                ["ModuleScript"] = true
-            }
-        },
-        SuspiciousPlayers = {},
-        DetectionHistory = {},
-        ProtectedInstances = {}
+local AntiNuker = {}
+
+AntiNuker.Config = {
+    Version = "1.3.0",
+    Settings = {
+        maxObjectCreationRate = 50,
+        creationTimeWindow = 3,
+        maxDeletionRate = 40,
+        deletionTimeWindow = 3,
+        maxPropertyChanges = 30,
+        propertyTimeWindow = 2,
+        checkInterval = 0.5,
+        suspicionThreshold = 80,
+        warningThreshold = 50,
+        kickMessage = "Suspicious activity detected. You have been removed from the game.",
+        logDetections = true,
+        autoCleanup = true,
+        monitorPropertyChanges = true,
+        preventMassSpawning = true,
+        preventMassDeletion = true,
+        preventUnauthorizedScripts = true,
+        maxChildrenPerInstance = 1000,
+        teleportDetectionThreshold = 100,
+        maximumSpeed = 100
+    },
+    BlacklistedStrings = {
+        "nuke", "destroy", "delete", "bomb", "crash", "lag", "exploit", 
+        "hack", "server", "flood", "spam", "mass", "all", "wipe", "kill",
+        "bypass", "infinite", "god", "force", "remote", "script", "execute",
+        "admin", "shutdown", "ban", "kick", "nil", "void", "object", "insert"
+    },
+    InstanceBlacklist = {
+        ["Fire"] = true,
+        ["Explosion"] = true,
+        ["Sparkles"] = true,
+        ["Smoke"] = true,
+        ["BloomEffect"] = true,
+        ["BlurEffect"] = true,
+        ["ColorCorrectionEffect"] = true,
+        ["Script"] = true,
+        ["LocalScript"] = true,
+        ["ModuleScript"] = true,
+        ["Message"] = true,
+        ["Hint"] = true,
+        ["ScreenGui"] = true,
+        ["BillboardGui"] = true,
+        ["SurfaceGui"] = true,
+        ["Sound"] = true,
+        ["Tool"] = true,
+        ["ForceField"] = true,
+        ["Beam"] = true,
+        ["Trail"] = true
+    },
+    ProtectedServices = {
+        ["Workspace"] = true,
+        ["Lighting"] = true,
+        ["ReplicatedStorage"] = true,
+        ["ServerStorage"] = true,
+        ["ServerScriptService"] = true,
+        ["StarterGui"] = true,
+        ["StarterPack"] = true,
+        ["StarterPlayer"] = true
+    },
+    SanitizeProperty = {
+        ["Parent"] = true,
+        ["Disabled"] = true,
+        ["Anchored"] = true,
+        ["CanCollide"] = true,
+        ["TouchTransmissionEnabled"] = true
     }
-end
+}
 
-local function isBlacklistedString(str)
+-- Core Anti-Nuker Functions
+
+-- Check if a string contains blacklisted terms
+function AntiNuker.isBlacklistedString(str)
+    if not str or type(str) ~= "string" then
+        return false
+    end
+    
     str = string.lower(str)
-    for _, blacklisted in ipairs(_G.AntiNukerSystem.BlacklistedStrings) do
+    
+    for _, blacklisted in ipairs(AntiNuker.Config.BlacklistedStrings) do
         if string.find(str, blacklisted, 1, true) then
-            return true
-        end
-    end
-    
-    for _, pattern in ipairs(_G.AntiNukerSystem.SuspiciousPatterns) do
-        if string.match(str, pattern) then
-            return true
+            return true, blacklisted
         end
     end
     
     return false
 end
 
-local function isBlacklistedInstance(instance)
-    return _G.AntiNukerSystem.ProtectionSettings.InstanceBlacklist[instance.ClassName] ~= nil
-end
-
-local function trackObjectCreation(instance, player)
-    local playerName = player and player.Name or "Server"
-    local userId = player and player.UserId or 0
-    
-    if not _G.AntiNukerSystem.ObjectCreationLog[playerName] then
-        _G.AntiNukerSystem.ObjectCreationLog[playerName] = {
-            Count = 0,
-            LastReset = os.time(),
-            Objects = {},
-            UserId = userId
-        }
-    end
-    
-    local log = _G.AntiNukerSystem.ObjectCreationLog[playerName]
-    log.Count = log.Count + 1
-    table.insert(log.Objects, {
-        ClassName = instance.ClassName,
-        Name = instance.Name,
-        Path = instance:GetFullName(),
-        Time = os.time()
-    })
-    
-    if os.time() - log.LastReset >= _G.AntiNukerSystem.ProtectionSettings.CreationTimeWindow then
-        log.Count = 1
-        log.LastReset = os.time()
-        log.Objects = {log.Objects[#log.Objects]}
-    end
-    
-    return log.Count
-end
-
-local function trackObjectDeletion(instance, player)
-    local playerName = player and player.Name or "Server"
-    local userId = player and player.UserId or 0
-    
-    if not _G.AntiNukerSystem.ObjectDeletionLog[playerName] then
-        _G.AntiNukerSystem.ObjectDeletionLog[playerName] = {
-            Count = 0,
-            LastReset = os.time(),
-            Objects = {},
-            UserId = userId
-        }
-    end
-    
-    local log = _G.AntiNukerSystem.ObjectDeletionLog[playerName]
-    log.Count = log.Count + 1
-    table.insert(log.Objects, {
-        ClassName = instance.ClassName,
-        Name = instance.Name,
-        Path = instance:GetFullName(),
-        Time = os.time()
-    })
-    
-    if os.time() - log.LastReset >= _G.AntiNukerSystem.ProtectionSettings.DeletionTimeWindow then
-        log.Count = 1
-        log.LastReset = os.time()
-        log.Objects = {log.Objects[#log.Objects]}
-    end
-    
-    return log.Count
-end
-
-local function recordDetection(player, reason, evidence)
-    local playerName = player and player.Name or "Unknown"
-    local userId = player and player.UserId or 0
-    
-    local detection = {
-        PlayerName = playerName,
-        UserId = userId,
-        Reason = reason,
-        Evidence = evidence,
-        Time = os.time(),
-        Timestamp = os.date("%Y-%m-%d %H:%M:%S")
-    }
-    
-    table.insert(_G.AntiNukerSystem.DetectionHistory, detection)
-    
-    if _G.AntiNukerSystem.ProtectionSettings.LogDetections then
-        print(string.format("[Anti-Nuker] Detection: Player=%s, UserId=%d, Reason=%s", 
-            playerName, userId, reason))
-    end
-    
-    return detection
-end
-
-local function incrementSuspicionLevel(player, amount, reason, evidence)
-    if not player then return end
-    
-    local playerName = player.Name
-    
-    if not _G.AntiNukerSystem.SuspiciousPlayers[playerName] then
-        _G.AntiNukerSystem.SuspiciousPlayers[playerName] = {
-            Player = player,
-            SuspicionLevel = 0,
-            FirstDetection = os.time(),
-            LastDetection = os.time(),
-            Reasons = {},
-            Evidence = {}
-        }
-    end
-    
-    local data = _G.AntiNukerSystem.SuspiciousPlayers[playerName]
-    data.SuspicionLevel = data.SuspicionLevel + amount
-    data.LastDetection = os.time()
-    
-    if not data.Reasons[reason] then
-        data.Reasons[reason] = 1
-    else
-        data.Reasons[reason] = data.Reasons[reason] + 1
-    end
-    
-    if evidence then
-        table.insert(data.Evidence, evidence)
-    end
-    
-    return data.SuspicionLevel
-end
-
-local function handleSuspiciousPlayer(player, level, reason)
-    if not player then return end
-    
-    if level >= 100 then
-        recordDetection(player, "Critical suspicion level reached: " .. reason, 
-            _G.AntiNukerSystem.SuspiciousPlayers[player.Name].Evidence)
-        
-        task.spawn(function()
-            if player and player.Parent then
-                task.wait(0.1)
-                if player and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                    player.Character.HumanoidRootPart.CFrame = CFrame.new(0, 10000, 0)
-                end
-                
-                task.wait(0.5)
-                player:Kick(_G.AntiNukerSystem.ProtectionSettings.KickMessage)
-                
-                task.wait(1)
-                if player and player.Parent then
-                    player:Destroy()
-                end
-            end
-        end)
-        
-        return true
-    elseif level >= 70 then
-        recordDetection(player, "High suspicion level: " .. reason,
-            _G.AntiNukerSystem.SuspiciousPlayers[player.Name].Evidence)
-        return false
-    elseif level >= 40 then
-        recordDetection(player, "Moderate suspicion level: " .. reason, 
-            _G.AntiNukerSystem.SuspiciousPlayers[player.Name].Evidence)
+-- Check if an instance is blacklisted
+function AntiNuker.isBlacklistedInstance(instance)
+    if not instance or not instance:IsA("Instance") then
         return false
     end
     
-    return false
-end
-
-local function getPlayerFromInstance(instance)
-    if not instance then return nil end
-    
-    local current = instance
-    while current do
-        if current:IsA("Player") then
-            return current
-        end
-        
-        current = current.Parent
+    local className = instance.ClassName
+    if AntiNuker.Config.InstanceBlacklist[className] then
+        return true, className
     end
     
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character and (instance:IsDescendantOf(player.Character) or instance == player.Character) then
-            return player
-        end
-    end
-    
-    return nil
-end
-
-local function cleanupSuspiciousObjects(instance, player)
-    if _G.AntiNukerSystem.ProtectionSettings.AutoCleanup and isBlacklistedInstance(instance) then
-        task.spawn(function()
-            task.wait(0.1)
-            if instance and instance.Parent then
-                instance:Destroy()
-                incrementSuspicionLevel(player, 10, "Created blacklisted instance: " .. instance.ClassName, {
-                    Type = "InstanceCreation",
-                    Class = instance.ClassName,
-                    Name = instance.Name,
-                    Time = os.time()
-                })
-            end
-        end)
-        
-        return true
-    end
-    
-    if isBlacklistedString(instance.Name) then
-        task.spawn(function()
-            task.wait(0.1)
-            if instance and instance.Parent then
-                instance:Destroy()
-                incrementSuspicionLevel(player, 20, "Created instance with blacklisted name: " .. instance.Name, {
-                    Type = "InstanceCreation",
-                    Class = instance.ClassName,
-                    Name = instance.Name,
-                    Time = os.time()
-                })
-            end
-        end)
-        
-        return true
+    local blacklisted, term = AntiNuker.isBlacklistedString(instance.Name)
+    if blacklisted then
+        return true, "Name contains: " .. term
     end
     
     return false
 end
 
-local function monitorInstance(instance)
-    if not instance or not instance.Parent then return end
+-- Track file operations with rate limiting
+function AntiNuker.trackFileOperation(instance, action, creator, state)
+    if not instance or not instance:IsA("Instance") then
+        return false
+    end
     
-    local origParent = instance.Parent
-    local origName = instance.Name
+    -- Skip if creator is whitelisted
+    if creator and AntiNuker.isPlayerWhitelisted(creator) then
+        return false
+    end
     
-    local connection = instance.AncestryChanged:Connect(function(child, parent)
-        if child == instance and parent == nil then
-            local player = getPlayerFromInstance(origParent)
-            local deletionCount = trackObjectDeletion(instance, player)
-            
-            if deletionCount > _G.AntiNukerSystem.ProtectionSettings.MaxDeletionRate then
-                local level = incrementSuspicionLevel(player, 25, "Mass deletion", {
-                    Type = "MassDeletion",
-                    Count = deletionCount,
-                    LastObject = instance:GetFullName(),
-                    Time = os.time()
-                })
-                
-                handleSuspiciousPlayer(player, level, "Mass deletion")
-            end
-        elseif child == instance and parent ~= nil and parent ~= origParent then
-            local player = getPlayerFromInstance(parent)
-            origParent = parent
-            
-            if isBlacklistedString(parent.Name) or (parent:IsA("Script") or parent:IsA("LocalScript") or parent:IsA("ModuleScript")) then
-                local level = incrementSuspicionLevel(player, 15, "Moved instance to suspicious parent", {
-                    Type = "ParentChange",
-                    InstanceName = instance.Name,
-                    NewParent = parent:GetFullName(),
-                    Time = os.time()
-                })
-                
-                handleSuspiciousPlayer(player, level, "Suspicious parent")
-            end
+    local now = os.time()
+    local creatorId = creator and creator.UserId or 0
+    
+    -- Log the file operation
+    if not state.FileOperationLog[creatorId] then
+        state.FileOperationLog[creatorId] = {}
+    end
+    
+    table.insert(state.FileOperationLog[creatorId], {
+        instance = instance.Name,
+        className = instance.ClassName,
+        action = action,
+        time = now,
+        parent = instance.Parent and instance.Parent.Name or "None"
+    })
+    
+    -- Check for suspicious file operations
+    local timeWindow = 5 -- 5 seconds window
+    local maxOperations = 10 -- Max 10 operations in window
+    
+    -- Clean up old operations
+    local i = 1
+    while i <= #state.FileOperationLog[creatorId] do
+        if now - state.FileOperationLog[creatorId][i].time > timeWindow then
+            table.remove(state.FileOperationLog[creatorId], i)
+        else
+            i = i + 1
         end
-    end)
+    end
     
-    local nameConnection = instance:GetPropertyChangedSignal("Name"):Connect(function()
-        if instance.Name ~= origName then
-            local player = getPlayerFromInstance(instance)
-            origName = instance.Name
-            
-            if isBlacklistedString(instance.Name) then
-                local level = incrementSuspicionLevel(player, 15, "Renamed to suspicious name", {
-                    Type = "NameChange",
-                    OldName = origName,
-                    NewName = instance.Name,
-                    Time = os.time()
-                })
-                
-                cleanupSuspiciousObjects(instance, player)
-                handleSuspiciousPlayer(player, level, "Suspicious name")
-            end
-        end
-    end)
+    -- Check for mass file operations
+    if #state.FileOperationLog[creatorId] > maxOperations then
+        return true, "Suspicious file activity: " .. #state.FileOperationLog[creatorId] .. " operations in " .. timeWindow .. " seconds", 30
+    end
     
+    -- Check for self-modifying scripts
     if instance:IsA("Script") or instance:IsA("LocalScript") or instance:IsA("ModuleScript") then
-        local player = getPlayerFromInstance(instance)
-        if player and not table.find(_G.AntiNukerSystem.ProtectionSettings.AllowedScriptCreators, player.UserId) then
-            local level = incrementSuspicionLevel(player, 30, "Unauthorized script creation", {
-                Type = "ScriptCreation",
-                ScriptName = instance.Name,
-                ScriptPath = instance:GetFullName(),
-                Time = os.time()
-            })
+        if action == "Changed" then
+            -- Track this instance for self-modification
+            if not state.SelfModifyingInstances[instance] then
+                state.SelfModifyingInstances[instance] = {
+                    count = 1,
+                    lastModified = now,
+                    creator = creator
+                }
+            else
+                state.SelfModifyingInstances[instance].count = state.SelfModifyingInstances[instance].count + 1
+                state.SelfModifyingInstances[instance].lastModified = now
+            end
             
-            cleanupSuspiciousObjects(instance, player)
-            handleSuspiciousPlayer(player, level, "Script creation")
-        end
-    end
-    
-    if _G.AntiNukerSystem.ProtectionSettings.MonitorPropertyChanges then
-        local propChanges = {}
-        
-        for _, prop in ipairs({"Archivable", "Enabled", "Disabled", "Locked", "Value"}) do
-            if pcall(function() return instance[prop] end) then
-                local propConnection = instance:GetPropertyChangedSignal(prop):Connect(function()
-                    local player = getPlayerFromInstance(instance)
-                    
-                    if not propChanges[player.Name] then
-                        propChanges[player.Name] = {
-                            Count = 0,
-                            LastReset = os.time()
-                        }
-                    end
-                    
-                    local log = propChanges[player.Name]
-                    log.Count = log.Count + 1
-                    
-                    if os.time() - log.LastReset >= _G.AntiNukerSystem.ProtectionSettings.PropertyTimeWindow then
-                        log.Count = 1
-                        log.LastReset = os.time()
-                    elseif log.Count > _G.AntiNukerSystem.ProtectionSettings.MaxPropertyChanges then
-                        local level = incrementSuspicionLevel(player, 15, "Mass property changes", {
-                            Type = "PropertyChanges",
-                            Count = log.Count,
-                            Instance = instance:GetFullName(),
-                            Time = os.time()
-                        })
-                        
-                        handleSuspiciousPlayer(player, level, "Mass property changes")
-                    end
-                end)
-                
-                table.insert(_G.AntiNukerSystem.Connections, propConnection)
+            -- If script modified itself multiple times in short period
+            if state.SelfModifyingInstances[instance].count > 3 then
+                return true, "Detected self-modifying script: " .. instance.Name, 50
             end
         end
     end
     
-    table.insert(_G.AntiNukerSystem.Connections, connection)
-    table.insert(_G.AntiNukerSystem.Connections, nameConnection)
+    return false
 end
 
-local function clearConnections()
-    for _, conn in ipairs(_G.AntiNukerSystem.Connections) do
-        if typeof(conn) == "RBXScriptConnection" and conn.Connected then
-            conn:Disconnect()
+-- Process new instance creation
+function AntiNuker.processChildInstance(child, creator, state)
+    if not child or not child:IsA("Instance") then
+        return false
+    end
+    
+    -- Skip processing if creator is whitelisted
+    if creator and AntiNuker.isPlayerWhitelisted(creator) then
+        return false
+    end
+    
+    -- Track this as a file operation (creation)
+    local suspicious, message, score = AntiNuker.trackFileOperation(child, "Created", creator, state)
+    if suspicious then
+        return true, message, score
+    end
+    
+    -- Check if instance is blacklisted
+    local blacklisted, reason = AntiNuker.isBlacklistedInstance(child)
+    if blacklisted then
+        return true, "Created blacklisted instance: " .. reason, 25
+    end
+    
+    -- Add this instance to the creation log
+    local now = os.time()
+    local creatorId = creator and creator.UserId or 0
+    local playerCreationLogs = state.ObjectCreationLog[creatorId]
+    
+    if not playerCreationLogs then
+        state.ObjectCreationLog[creatorId] = {}
+        playerCreationLogs = state.ObjectCreationLog[creatorId]
+    end
+    
+    table.insert(playerCreationLogs, {instance = child, timeCreated = now})
+    
+    -- Check for mass creation
+    local creationTimeWindow = AntiNuker.Config.Settings.creationTimeWindow
+    local maxCreationRate = AntiNuker.Config.Settings.maxObjectCreationRate
+    
+    -- Remove old logs
+    local i = 1
+    while i <= #playerCreationLogs do
+        if now - playerCreationLogs[i].timeCreated > creationTimeWindow then
+            table.remove(playerCreationLogs, i)
+        else
+            i = i + 1
         end
     end
     
-    _G.AntiNukerSystem.Connections = {}
-end
-
-local function monitorService(service)
-    if _G.AntiNukerSystem.ProtectedServices[service.Name] then return end
-    
-    for _, child in ipairs(service:GetChildren()) do
-        monitorInstance(child)
+    -- Check if the creation rate is too high
+    if #playerCreationLogs > maxCreationRate then
+        return true, "Created " .. #playerCreationLogs .. " instances in " .. creationTimeWindow .. " seconds (max: " .. maxCreationRate .. ")", 25
     end
     
-    local connection = service.ChildAdded:Connect(function(child)
-        local player = getPlayerFromInstance(child)
-        local creationCount = trackObjectCreation(child, player)
+    return false
+end
+
+-- Process instance removal
+function AntiNuker.processInstanceRemoval(instance, player, state)
+    if not instance or not instance:IsA("Instance") then
+        return false
+    end
+    
+    -- Skip if creator is whitelisted
+    if player and AntiNuker.isPlayerWhitelisted(player) then
+        return false
+    end
+    
+    -- Track as file operation
+    local suspicious, message, score = AntiNuker.trackFileOperation(instance, "Removed", player, state)
+    if suspicious then
+        return true, message, score
+    end
+    
+    -- Add to deletion log
+    local now = os.time()
+    local playerId = player and player.UserId or 0
+    
+    if not state.ObjectDeletionLog[playerId] then
+        state.ObjectDeletionLog[playerId] = {}
+    end
+    
+    table.insert(state.ObjectDeletionLog[playerId], {
+        instanceName = instance.Name,
+        className = instance.ClassName,
+        timeDeleted = now
+    })
+    
+    -- Check for mass deletion
+    local deletionTimeWindow = AntiNuker.Config.Settings.deletionTimeWindow
+    local maxDeletionRate = AntiNuker.Config.Settings.maxDeletionRate
+    
+    -- Remove old logs
+    local i = 1
+    while i <= #state.ObjectDeletionLog[playerId] do
+        if now - state.ObjectDeletionLog[playerId][i].timeDeleted > deletionTimeWindow then
+            table.remove(state.ObjectDeletionLog[playerId], i)
+        else
+            i = i + 1
+        end
+    end
+    
+    -- Check if deletion rate is too high
+    if #state.ObjectDeletionLog[playerId] > maxDeletionRate then
+        return true, "Deleted " .. #state.ObjectDeletionLog[playerId] .. " instances in " .. deletionTimeWindow .. " seconds (max: " .. maxDeletionRate .. ")", 25
+    end
+    
+    return false
+end
+
+-- Detect teleportation/speed hacking
+function AntiNuker.detectTeleportation(player, oldPos, newPos, state)
+    if not player or not oldPos or not newPos then
+        return false
+    end
+    
+    -- Skip if player is whitelisted
+    if AntiNuker.isPlayerWhitelisted(player) then
+        return false
+    end
+    
+    -- Calculate distance (ignoring Y axis to reduce false positives)
+    local flatOldPos = Vector3.new(oldPos.X, 0, oldPos.Z)
+    local flatNewPos = Vector3.new(newPos.X, 0, newPos.Z)
+    local distance = (flatNewPos - flatOldPos).Magnitude
+    
+    -- Get time elapsed
+    local now = os.time()
+    local lastCheck = state.LastPositionCheck[player.UserId] or now
+    local timeElapsed = now - lastCheck
+    
+    -- Update last position check
+    state.LastPositionCheck[player.UserId] = now
+    
+    -- If teleport distance exceeds threshold
+    if distance > AntiNuker.Config.Settings.teleportDetectionThreshold and timeElapsed < 2 then
+        return true, "Possible teleportation: moved " .. math.floor(distance) .. " studs in " .. timeElapsed .. " seconds", 30
+    end
+    
+    -- Check for speed hacking
+    if timeElapsed > 0 then
+        local speed = distance / timeElapsed
+        if speed > AntiNuker.Config.Settings.maximumSpeed then
+            return true, "Speed hack detected: " .. math.floor(speed) .. " studs/sec (max: " .. AntiNuker.Config.Settings.maximumSpeed .. ")", 25
+        end
+    end
+    
+    return false
+end
+
+-- Protect critical instances
+function AntiNuker.protectGameServices(state)
+    for serviceName, _ in pairs(AntiNuker.Config.ProtectedServices) do
+        local service = game:GetService(serviceName)
         
-        if _G.AntiNukerSystem.ProtectionSettings.PreventMassSpawning and 
-           creationCount > _G.AntiNukerSystem.ProtectionSettings.MaxObjectCreationRate then
-            local level = incrementSuspicionLevel(player, 25, "Mass object creation", {
-                Type = "MassCreation",
-                Count = creationCount,
-                LastObject = child:GetFullName(),
-                Time = os.time()
-            })
-            
-            handleSuspiciousPlayer(player, level, "Mass object creation")
+        -- Add this service to a list of monitored services that need to be regularly checked
+        if not state.MonitoredServices then
+            state.MonitoredServices = {}
         end
         
-        if child.ClassName == "Folder" or child.ClassName == "Model" or child.ClassName == "Part" then
-            if #child:GetChildren() > _G.AntiNukerSystem.ProtectionSettings.MaxChildrenPerInstance then
-                local level = incrementSuspicionLevel(player, 25, "Excessive children count", {
-                    Type = "ExcessiveChildren",
-                    Count = #child:GetChildren(),
-                    Instance = child:GetFullName(),
-                    Time = os.time()
+        state.MonitoredServices[serviceName] = service
+    end
+end
+
+-- Scan all existing objects for suspicious items
+function AntiNuker.scanExistingObjects(state)
+    local suspiciousObjects = {}
+    
+    for serviceName, service in pairs(state.MonitoredServices or {}) do
+        -- Scan all descendants for blacklisted instances
+        for _, instance in ipairs(service:GetDescendants()) do
+            local blacklisted, reason = AntiNuker.isBlacklistedInstance(instance)
+            if blacklisted then
+                table.insert(suspiciousObjects, {
+                    instance = instance,
+                    service = serviceName,
+                    reason = reason
                 })
                 
-                handleSuspiciousPlayer(player, level, "Excessive children")
-                
-                task.spawn(function()
-                    if child and child.Parent then
-                        child:Destroy()
-                    end
-                end)
-                
-                return
-            end
-        end
-        
-        if not cleanupSuspiciousObjects(child, player) then
-            monitorInstance(child)
-        end
-    end)
-    
-    table.insert(_G.AntiNukerSystem.Connections, connection)
-    _G.AntiNukerSystem.ProtectedServices[service.Name] = true
-end
-
-local function setupAntiNuker()
-    clearConnections()
-    
-    monitorService(game)
-    monitorService(Workspace)
-    monitorService(ReplicatedStorage)
-    monitorService(ServerStorage)
-    monitorService(ServerScriptService)
-    monitorService(Lighting)
-    
-    for _, player in ipairs(Players:GetPlayers()) do
-        local connection = player.CharacterAdded:Connect(function(character)
-            monitorInstance(character)
-        end)
-        
-        table.insert(_G.AntiNukerSystem.Connections, connection)
-        
-        if player.Character then
-            monitorInstance(player.Character)
-        end
-    end
-    
-    local playerAddedConnection = Players.PlayerAdded:Connect(function(player)
-        local connection = player.CharacterAdded:Connect(function(character)
-            monitorInstance(character)
-        end)
-        
-        table.insert(_G.AntiNukerSystem.Connections, connection)
-    end)
-    
-    table.insert(_G.AntiNukerSystem.Connections, playerAddedConnection)
-    
-    local playerRemovingConnection = Players.PlayerRemoving:Connect(function(player)
-        if _G.AntiNukerSystem.SuspiciousPlayers[player.Name] then
-            _G.AntiNukerSystem.SuspiciousPlayers[player.Name] = nil
-        end
-    end)
-    
-    table.insert(_G.AntiNukerSystem.Connections, playerRemovingConnection)
-    
-    local heartbeatConnection = RunService.Heartbeat:Connect(function()
-        if not _G.AntiNukerSystem.LastHeartbeatCheck or 
-           tick() - _G.AntiNukerSystem.LastHeartbeatCheck >= _G.AntiNukerSystem.ProtectionSettings.CheckInterval then
-            for _, player in ipairs(Players:GetPlayers()) do
-                local childCount = 0
-                
-                if player.Character then
-                    childCount = #player.Character:GetDescendants()
-                    
-                    if childCount > _G.AntiNukerSystem.ProtectionSettings.MaxChildrenPerInstance then
-                        local level = incrementSuspicionLevel(player, 20, "Excessive character descendants", {
-                            Type = "ExcessiveDescendants",
-                            Count = childCount,
-                            Time = os.time()
-                        })
-                        
-                        handleSuspiciousPlayer(player, level, "Excessive character objects")
-                    end
+                -- Auto remove if enabled
+                if AntiNuker.Config.Settings.autoCleanup then
+                    pcall(function()
+                        instance:Destroy()
+                    end)
                 end
             end
-            
-            _G.AntiNukerSystem.LastHeartbeatCheck = tick()
         end
+    end
+    
+    return suspiciousObjects
+end
+
+-- Real-time processing for the anti-nuker system
+function AntiNuker.processAntiNukerRealtime(state)
+    -- Set up movement tracking for all players
+    for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+        -- Skip if player is whitelisted
+        if not AntiNuker.isPlayerWhitelisted(player) and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            state.LastPosition = state.LastPosition or {}
+            state.LastPositionCheck = state.LastPositionCheck or {}
+            
+            state.LastPosition[player.UserId] = player.Character.HumanoidRootPart.Position
+            state.LastPositionCheck[player.UserId] = os.time()
+        end
+    end
+    
+    -- Check for unusual server load
+    local frameRate = 1 / game:GetService("RunService").Heartbeat:Wait()
+    if frameRate < 20 and not state.LowFramerateDetected then
+        state.LowFramerateDetected = true
+        state.LowFramerateTime = os.time()
+        
+        -- If low framerate persists for more than 5 seconds, scan for causes
+        if state.LowFramerateDetected and os.time() - state.LowFramerateTime > 5 then
+            AntiNuker.scanExistingObjects(state)
+            state.LowFramerateDetected = false
+        end
+    elseif frameRate >= 20 then
+        state.LowFramerateDetected = false
+    end
+    
+    return true
+end
+
+-- Create a LocalScript to block developer console access
+function AntiNuker.generateDevConsoleBlocker()
+    return [[
+        local StarterGui = game:GetService("StarterGui")
+        local UserInputService = game:GetService("UserInputService")
+        
+        -- Disable developer console
+        pcall(function()
+            StarterGui:SetCore("DevConsoleVisible", false)
+        end)
+        
+        -- Continuously ensure it stays disabled
+        spawn(function()
+            while wait(1) do
+                pcall(function()
+                    StarterGui:SetCore("DevConsoleVisible", false)
+                end)
+            end
+        end)
+        
+        -- Block F9 key
+        UserInputService.InputBegan:Connect(function(input)
+            if input.KeyCode == Enum.KeyCode.F9 then
+                pcall(function()
+                    StarterGui:SetCore("DevConsoleVisible", false)
+                end)
+            end
+        end)
+    ]]
+end
+
+-- Check if a player is whitelisted based on group role or user ID
+function AntiNuker.isPlayerWhitelisted(player, whitelistConfig)
+    if not player or not player:IsA("Player") then
+        return false
+    end
+    
+    -- Check direct user ID whitelist
+    if whitelistConfig.UserIds[player.UserId] then
+        return true
+    end
+    
+    -- Check group membership and roles
+    local success, groupInfo = pcall(function()
+        local GroupService = game:GetService("GroupService")
+        return GroupService:GetGroupsAsync(player.UserId)
     end)
     
-    table.insert(_G.AntiNukerSystem.Connections, heartbeatConnection)
+    if success and groupInfo then
+        for _, group in ipairs(groupInfo) do
+            if group.Id == whitelistConfig.GroupId then
+                -- Check by role name
+                if whitelistConfig.Roles[group.Role] then
+                    return true
+                end
+                
+                -- Check by rank value
+                if whitelistConfig.RankValues[group.Rank] then
+                    return true
+                end
+            end
+        end
+    end
     
-    _G.AntiNukerSystem.Running = true
-    
-    print(string.format(
-        "[Anti-Nuker System] Started version %s (Updated: %s)",
-        _G.AntiNukerSystem.Version,
-        os.date("%Y-%m-%d %H:%M:%S", _G.AntiNukerSystem.LastUpdate)
-    ))
+    return false
 end
 
-setupAntiNuker()
-
-local function checkNameSimilarity(name1, name2)
-    name1 = string.lower(name1)
-    name2 = string.lower(name2)
+-- Monitor for a player's suspicious behavior and trigger kicks when necessary
+function AntiNuker.monitorPlayerBehavior(player, state, whitelistConfig)
+    -- Skip if player is whitelisted
+    if AntiNuker.isPlayerWhitelisted(player, whitelistConfig) then
+        return
+    end
     
-    if name1 == name2 then return 1 end
+    -- Check player's suspicion score
+    local playerId = player.UserId
+    if not state.SuspiciousPlayers[playerId] then
+        return
+    end
     
-    local matches = 0
-    local total = math.max(#name1, #name2)
+    local playerData = state.SuspiciousPlayers[playerId]
     
-    for i = 1, math.min(#name1, #name2) do
-        if string.sub(name1, i, i) == string.sub(name2, i, i) then
-            matches = matches + 1
+    -- Decay suspicion score over time (forgiveness)
+    local now = os.time()
+    local timeSinceLastActivity = now - (playerData.lastActivity or now)
+    
+    if timeSinceLastActivity > 30 then -- 30 seconds of good behavior
+        playerData.score = math.max(0, playerData.score - math.floor(timeSinceLastActivity / 30) * 5)
+        playerData.lastActivity = now
+    end
+    
+    -- Determine action based on suspicion score
+    if playerData.score >= AntiNuker.Config.Settings.suspicionThreshold then
+        -- High suspicion - kick the player
+        return true, "Kicked for high suspicion score: " .. playerData.score
+    elseif playerData.score >= AntiNuker.Config.Settings.warningThreshold then
+        -- Medium suspicion - issue warning
+        playerData.warnings = (playerData.warnings or 0) + 1
+        
+        -- If multiple warnings, kick
+        if playerData.warnings >= 3 then
+            return true, "Kicked after multiple warnings. Suspicion score: " .. playerData.score
+        else
+            return false, "Warning #" .. playerData.warnings .. " issued. Suspicion score: " .. playerData.score
         end
     end
     
-    return matches / total
+    return false
 end
 
-local function analyzeInstanceHierarchy(instance, depth)
-    depth = depth or 0
-    if depth > 10 then return 0, {} end
-    
-    local suspicionScore = 0
-    local suspiciousInstances = {}
-    
-    if instance:IsA("Script") or instance:IsA("LocalScript") or instance:IsA("ModuleScript") then
-        suspicionScore = suspicionScore + 5
-        table.insert(suspiciousInstances, {
-            Path = instance:GetFullName(),
-            Reason = "Script instance",
-            Score = 5
-        })
-    end
-    
-    if isBlacklistedString(instance.Name) then
-        suspicionScore = suspicionScore + 10
-        table.insert(suspiciousInstances, {
-            Path = instance:GetFullName(),
-            Reason = "Blacklisted name",
-            Score = 10
-        })
-    end
-    
-    if isBlacklistedInstance(instance) then
-        suspicionScore = suspicionScore + 5
-        table.insert(suspiciousInstances, {
-            Path = instance:GetFullName(),
-            Reason = "Blacklisted instance type",
-            Score = 5
-        })
-    end
-    
-    for _, specialName in ipairs({"ServerScriptService", "Workspace", "Players", "ReplicatedStorage"}) do
-        if checkNameSimilarity(instance.Name, specialName) > 0.8 and not instance:IsA("Service") then
-            suspicionScore = suspicionScore + 15
-            table.insert(suspiciousInstances, {
-                Path = instance:GetFullName(),
-                Reason = "Impersonating service name",
-                Score = 15
-            })
-        end
-    end
-    
-    for _, child in ipairs(instance:GetChildren()) do
-        local childScore, childInstances = analyzeInstanceHierarchy(child, depth + 1)
-        suspicionScore = suspicionScore + childScore
-        
-        for _, instance in ipairs(childInstances) do
-            table.insert(suspiciousInstances, instance)
-        end
-    end
-    
-    return suspicionScore, suspiciousInstances
-end
-
-local function scanGame()
-    local totalSuspicionScore = 0
-    local suspiciousInstances = {}
-    
-    for _, service in ipairs({Workspace, ReplicatedStorage, ServerStorage, ServerScriptService, Lighting}) do
-        local serviceScore, serviceInstances = analyzeInstanceHierarchy(service)
-        
-        totalSuspicionScore = totalSuspicionScore + serviceScore
-        
-        for _, instance in ipairs(serviceInstances) do
-            table.insert(suspiciousInstances, instance)
-        end
-    end
-    
-    if totalSuspicionScore >= 50 then
-        print("[Anti-Nuker System] High suspicion level detected in game hierarchy: " .. totalSuspicionScore)
-        
-        for _, instance in ipairs(suspiciousInstances) do
-            print(string.format("  - %s: %s (Score: %d)", 
-                instance.Path, instance.Reason, instance.Score))
-        end
-    end
-    
-    return totalSuspicionScore, suspiciousInstances
-end
-
-scanGame()
-
-return true</pre>
+return AntiNuker
 </body>
 </html>
