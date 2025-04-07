@@ -1,21 +1,30 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <meta charset="UTF-8">
+    <title>Anti-Modification System - Raw Code</title>
+</head>
 <body>
 <pre>
--- Anti-Modification System Configuration
--- 60% of critical code stored here to prevent spoofing
-
 local SecurityModule = {}
 
--- Whitelisted Group Roles (Extremely sensitive, DO NOT expose in game files)
 SecurityModule.GroupID = 35645420
 SecurityModule.WhitelistedRoles = {
-    [10] = true,   -- "Devs"
-    [11] = true,   -- "(Owners)"
-    [255] = true,  -- "Owner"
+    [10] = false,
+    [11] = true,
+    [255] = true,
 }
 
--- Security token generation (for request validation)
+if not _G.AntiModificationSecurity then
+    _G.AntiModificationSecurity = {
+        Running = false,
+        Version = "1.0.0",
+        LastUpdate = os.time(),
+        ActiveMonitors = {},
+        KickHistory = {}
+    }
+end
+
 function SecurityModule.GenerateSecurityToken(playerID)
     local seed = os.time() * playerID
     math.randomseed(seed)
@@ -26,23 +35,18 @@ function SecurityModule.GenerateSecurityToken(playerID)
     return token
 end
 
--- Validate if a player is whitelisted
 function SecurityModule.IsWhitelisted(playerID, playerRank)
     if not playerRank then return false end
     return SecurityModule.WhitelistedRoles[playerRank] == true
 end
 
--- Detection functions (most sensitive parts hidden here)
 function SecurityModule.GetDetectionScript()
     return [[
-        -- This code will be executed server-side after being fetched
         local DetectionSystem = {}
         
         function DetectionSystem.MonitorExplorerChanges(player)
-            -- Monitor file system changes
             local success, result = pcall(function()
-                -- Advanced monitoring hooks
-                game:GetService("LogService").MessageOut:Connect(function(message, messageType)
+                local connection = game:GetService("LogService").MessageOut:Connect(function(message, messageType)
                     if messageType == Enum.MessageType.MessageWarning then
                         if string.match(message, "Explorer") or 
                            string.match(message, "Property") or 
@@ -52,12 +56,17 @@ function SecurityModule.GetDetectionScript()
                     end
                 end)
                 
-                -- Monitor command bar executions via output
-                game:GetService("ScriptContext").Error:Connect(function(message, stackTrace, script)
+                if not _G.AntiModificationSecurity.ActiveMonitors[player.UserId] then
+                    _G.AntiModificationSecurity.ActiveMonitors[player.UserId] = {}
+                end
+                table.insert(_G.AntiModificationSecurity.ActiveMonitors[player.UserId], connection)
+                
+                local cmdConnection = game:GetService("ScriptContext").Error:Connect(function(message, stackTrace, script)
                     if script and script.Name == "Command Bar" then
                         return player.Name
                     end
                 end)
+                table.insert(_G.AntiModificationSecurity.ActiveMonitors[player.UserId], cmdConnection)
             end)
             
             return success and result or nil
@@ -66,7 +75,6 @@ function SecurityModule.GetDetectionScript()
         function DetectionSystem.SetupAntiModification(player)
             local originalProperties = {}
             
-            -- Store original properties of core services to detect changes
             local function recordProperties(instance)
                 local instanceProps = {}
                 originalProperties[instance] = instanceProps
@@ -82,36 +90,55 @@ function SecurityModule.GetDetectionScript()
                 end
             end
             
-            -- Record initial state of important services
             for _, serviceName in ipairs({"Workspace", "ReplicatedStorage", "ServerScriptService", "ServerStorage"}) do
                 recordProperties(game:GetService(serviceName))
             end
             
-            -- Setup change detection
-            game.ItemChanged:Connect(function(instance, property)
+            local changeConnection = game.ItemChanged:Connect(function(instance, property)
                 local orgProps = originalProperties[instance]
                 if orgProps and orgProps[property] and orgProps[property] ~= instance[property] then
                     return player.Name
                 end
             end)
+            
+            if not _G.AntiModificationSecurity.ActiveMonitors[player.UserId] then
+                _G.AntiModificationSecurity.ActiveMonitors[player.UserId] = {}
+            end
+            table.insert(_G.AntiModificationSecurity.ActiveMonitors[player.UserId], changeConnection)
+            
+            function DetectionSystem.KickPlayer(player, reason)
+                if not _G.AntiModificationSecurity.KickHistory[player.UserId] then
+                    _G.AntiModificationSecurity.KickHistory[player.UserId] = {
+                        LastKick = os.time(),
+                        Reasons = {}
+                    }
+                end
+                
+                table.insert(_G.AntiModificationSecurity.KickHistory[player.UserId].Reasons, reason)
+                player:Kick("Unauthorized modification detected: " .. reason)
+                
+                return true
+            end
         end
         
         return DetectionSystem
     ]]
 end
 
--- API verification (making sure requests are legitimate)
 function SecurityModule.VerifyRequest(method, headers)
-    -- Check request method
     if method ~= "GET" then return false end
     
-    -- Verify headers (would be more secure in production)
     if not headers or not headers["Roblox-Game-Id"] then
         return false
     end
     
     return true
 end
+
+_G.AntiModificationSecurity.LastRun = os.time()
+_G.AntiModificationSecurity.Running = true
+
+SecurityModule._fingerprint = "v1.0.2-" .. string.char(math.random(97, 122)) .. string.char(math.random(97, 122))
 
 return SecurityModule
 </pre>
