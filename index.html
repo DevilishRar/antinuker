@@ -18,7 +18,7 @@ SecurityModule.WhitelistedRoles = {
 if not _G.AntiModificationSecurity then
     _G.AntiModificationSecurity = {
         Running = false,
-        Version = "1.0.0",
+        Version = "1.0.2",
         LastUpdate = os.time(),
         ActiveMonitors = {},
         KickHistory = {},
@@ -29,7 +29,11 @@ if not _G.AntiModificationSecurity then
             "ClassName",
             "Source",
             "Value",
-            "Disabled"
+            "Disabled",
+            "Position",
+            "Size",
+            "CFrame",
+            "Orientation"
         },
         ObjectSnapshots = {},
         DetectedActions = {
@@ -37,7 +41,8 @@ if not _G.AntiModificationSecurity then
             Uploads = {},
             Renames = {},
             Edits = {}
-        }
+        },
+        Connections = {}
     }
 end
 
@@ -59,6 +64,30 @@ end
 function SecurityModule.GetDetectionScript()
     return [[
         local DetectionSystem = {}
+        
+        function DetectionSystem.KickPlayer(player, reason)
+            if not player or not player.Parent then return false end
+            
+            reason = reason or "Unauthorized modification detected"
+            print("AntiModificationSystem: KICKING PLAYER " .. player.Name .. " - " .. reason)
+            warn("AntiModificationSystem: KICK EVENT - Player: " .. player.Name .. " | UserID: " .. player.UserId .. " | Reason: " .. reason)
+            
+            if not _G.AntiModificationSecurity.KickHistory[player.UserId] then
+                _G.AntiModificationSecurity.KickHistory[player.UserId] = {
+                    LastKick = os.time(),
+                    Reasons = {}
+                }
+            end
+            
+            table.insert(_G.AntiModificationSecurity.KickHistory[player.UserId].Reasons, reason)
+            _G.AntiModificationSecurity.KickHistory[player.UserId].LastKick = os.time()
+            
+            pcall(function()
+                player:Kick("Unauthorized modification detected: " .. reason)
+            end)
+            
+            return true
+        end
         
         function DetectionSystem.CreateObjectSnapshot(instance)
             if not instance then return nil end
@@ -105,7 +134,9 @@ function SecurityModule.GetDetectionScript()
             local snapshot = DetectionSystem.CreateObjectSnapshot(instance)
             _G.AntiModificationSecurity.ObjectSnapshots[instanceId] = snapshot
             
-            instance.Changed:Connect(function(property)
+            local connections = {}
+            
+            connections[#connections + 1] = instance.Changed:Connect(function(property)
                 task.spawn(function()
                     if player and not player.Parent then return end
                     
@@ -114,23 +145,27 @@ function SecurityModule.GetDetectionScript()
                         if currentSnapshot and currentSnapshot.Properties[property] ~= nil and 
                            currentSnapshot.Properties[property] ~= instance[property] then
                             
+                            print("AntiModificationSystem: Property change detected - Object: " .. instance:GetFullName() .. ", Property: " .. property)
+                            
                             _G.AntiModificationSecurity.DetectedActions.Edits[player.UserId] = {
                                 InstanceName = instance.Name,
                                 Property = property,
-                                OldValue = currentSnapshot.Properties[property],
-                                NewValue = instance[property],
+                                OldValue = tostring(currentSnapshot.Properties[property]),
+                                NewValue = tostring(instance[property]),
                                 TimeStamp = os.time()
                             }
                             
-                            return player.Name
+                            DetectionSystem.KickPlayer(player, "Modified property " .. property .. " of " .. instance.Name)
                         end
                     end
                 end)
             end)
             
-            instance.ChildAdded:Connect(function(child)
+            connections[#connections + 1] = instance.ChildAdded:Connect(function(child)
                 task.spawn(function()
                     if player and not player.Parent then return end
+                    
+                    print("AntiModificationSystem: Child added detected - Parent: " .. instance:GetFullName() .. ", Child: " .. child.Name)
                     
                     _G.AntiModificationSecurity.DetectedActions.Uploads[player.UserId] = {
                         ParentName = instance.Name,
@@ -139,13 +174,16 @@ function SecurityModule.GetDetectionScript()
                         TimeStamp = os.time()
                     }
                     
+                    DetectionSystem.KickPlayer(player, "Added new object: " .. child.Name .. " to " .. instance.Name)
                     DetectionSystem.MonitorInstanceChanges(child, player, depth + 1)
                 end)
             end)
             
-            instance.ChildRemoved:Connect(function(child)
+            connections[#connections + 1] = instance.ChildRemoved:Connect(function(child)
                 task.spawn(function()
                     if player and not player.Parent then return end
+                    
+                    print("AntiModificationSystem: Child removed detected - Parent: " .. instance:GetFullName() .. ", Child: " .. child.Name)
                     
                     _G.AntiModificationSecurity.DetectedActions.Deletions[player.UserId] = {
                         ParentName = instance.Name,
@@ -153,27 +191,45 @@ function SecurityModule.GetDetectionScript()
                         ChildType = child.ClassName,
                         TimeStamp = os.time()
                     }
+                    
+                    DetectionSystem.KickPlayer(player, "Removed object: " .. child.Name .. " from " .. instance.Name)
                 end)
             end)
             
-            instance.AncestryChanged:Connect(function(_, newParent)
+            connections[#connections + 1] = instance.AncestryChanged:Connect(function(_, newParent)
                 task.spawn(function()
                     if player and not player.Parent then return end
                     
                     if not newParent or newParent == nil then
+                        print("AntiModificationSystem: Object deleted - " .. instance:GetFullName())
+                        
                         _G.AntiModificationSecurity.DetectedActions.Deletions[player.UserId] = {
                             ObjectName = instance.Name,
                             TimeStamp = os.time()
                         }
+                        
+                        DetectionSystem.KickPlayer(player, "Deleted object: " .. instance.Name)
                     else
+                        print("AntiModificationSystem: Object moved/renamed - " .. instance.Name .. " to parent " .. newParent.Name)
+                        
                         _G.AntiModificationSecurity.DetectedActions.Renames[player.UserId] = {
                             ObjectName = instance.Name,
                             NewParent = newParent.Name,
                             TimeStamp = os.time()
                         }
+                        
+                        DetectionSystem.KickPlayer(player, "Moved/renamed object: " .. instance.Name)
                     end
                 end)
             end)
+            
+            if not _G.AntiModificationSecurity.Connections[player.UserId] then
+                _G.AntiModificationSecurity.Connections[player.UserId] = {}
+            end
+            
+            for _, conn in ipairs(connections) do
+                table.insert(_G.AntiModificationSecurity.Connections[player.UserId], conn)
+            end
             
             for _, child in ipairs(instance:GetChildren()) do
                 DetectionSystem.MonitorInstanceChanges(child, player, depth + 1)
@@ -182,24 +238,28 @@ function SecurityModule.GetDetectionScript()
         
         function DetectionSystem.MonitorExplorerChanges(player)
             local success, result = pcall(function()
+                if not _G.AntiModificationSecurity.ActiveMonitors[player.UserId] then
+                    _G.AntiModificationSecurity.ActiveMonitors[player.UserId] = {}
+                end
+                
                 local connection = game:GetService("LogService").MessageOut:Connect(function(message, messageType)
                     if messageType == Enum.MessageType.MessageWarning then
                         if string.match(message, "Explorer") or 
                            string.match(message, "Property") or 
                            string.match(message, "modified") then
-                            return player.Name
+                            print("AntiModificationSystem: Studio warning detected - " .. message)
+                            DetectionSystem.KickPlayer(player, "Explorer activity: " .. message:sub(1, 50))
+                            return true
                         end
                     end
                 end)
-                
-                if not _G.AntiModificationSecurity.ActiveMonitors[player.UserId] then
-                    _G.AntiModificationSecurity.ActiveMonitors[player.UserId] = {}
-                end
                 table.insert(_G.AntiModificationSecurity.ActiveMonitors[player.UserId], connection)
                 
                 local cmdConnection = game:GetService("ScriptContext").Error:Connect(function(message, stackTrace, script)
                     if script and script.Name == "Command Bar" then
-                        return player.Name
+                        print("AntiModificationSystem: Command Bar usage detected")
+                        DetectionSystem.KickPlayer(player, "Command Bar usage")
+                        return true
                     end
                 end)
                 table.insert(_G.AntiModificationSecurity.ActiveMonitors[player.UserId], cmdConnection)
@@ -208,22 +268,34 @@ function SecurityModule.GetDetectionScript()
                 if StudioService then
                     local scriptEditorConnection = StudioService.ScriptEditorOpened:Connect(function(script)
                         if player and player.Parent then
+                            print("AntiModificationSystem: Script editor opened - " .. script:GetFullName())
+                            
                             _G.AntiModificationSecurity.DetectedActions.Edits[player.UserId] = {
                                 Action = "ScriptEditorOpened",
                                 ScriptName = script.Name,
                                 ScriptPath = DetectionSystem.GetInstancePath(script),
                                 TimeStamp = os.time()
                             }
-                            return player.Name
+                            
+                            DetectionSystem.KickPlayer(player, "Opened script editor: " .. script.Name)
+                            return true
                         end
                     end)
                     table.insert(_G.AntiModificationSecurity.ActiveMonitors[player.UserId], scriptEditorConnection)
                 end
+                
+                game.ItemChanged:Connect(function(item, property)
+                    if player and player.Parent then
+                        print("AntiModificationSystem: Item changed - " .. item:GetFullName() .. ", Property: " .. property)
+                        DetectionSystem.KickPlayer(player, "Modified " .. property .. " of " .. item.Name)
+                        return true
+                    end
+                end)
             end)
             
             DetectionSystem.MonitorCriticalServices(player)
             
-            return success and result or nil
+            return success and true
         end
         
         function DetectionSystem.MonitorCriticalServices(player)
@@ -267,7 +339,9 @@ function SecurityModule.GetDetectionScript()
             local changeConnection = game.ItemChanged:Connect(function(instance, property)
                 local orgProps = originalProperties[instance]
                 if orgProps and orgProps[property] and orgProps[property] ~= instance[property] then
-                    return player.Name
+                    print("AntiModificationSystem: Property change from original state - " .. instance:GetFullName() .. ", Property: " .. property)
+                    DetectionSystem.KickPlayer(player, "Modified property from original state: " .. property)
+                    return true
                 end
             end)
             
@@ -276,39 +350,28 @@ function SecurityModule.GetDetectionScript()
             end
             table.insert(_G.AntiModificationSecurity.ActiveMonitors[player.UserId], changeConnection)
             
-            function DetectionSystem.KickPlayer(player, reason)
-                if not _G.AntiModificationSecurity.KickHistory[player.UserId] then
-                    _G.AntiModificationSecurity.KickHistory[player.UserId] = {
-                        LastKick = os.time(),
-                        Reasons = {}
-                    }
+            return false
+        end
+        
+        function DetectionSystem.CheckForModifications(player)
+            if not player or not player.Parent then return false end
+            
+            local playerActions = {
+                ["Deletion"] = _G.AntiModificationSecurity.DetectedActions.Deletions[player.UserId],
+                ["Upload"] = _G.AntiModificationSecurity.DetectedActions.Uploads[player.UserId],
+                ["Rename"] = _G.AntiModificationSecurity.DetectedActions.Renames[player.UserId],
+                ["Edit"] = _G.AntiModificationSecurity.DetectedActions.Edits[player.UserId]
+            }
+            
+            for actionType, data in pairs(playerActions) do
+                if data and os.time() - data.TimeStamp < 5 then
+                    print("AntiModificationSystem: Action detected in continuous check - Type: " .. actionType)
+                    DetectionSystem.KickPlayer(player, actionType .. " detected in continuous check")
+                    return true
                 end
-                
-                table.insert(_G.AntiModificationSecurity.KickHistory[player.UserId].Reasons, reason)
-                player:Kick("Unauthorized modification detected: " .. reason)
-                
-                return true
             end
             
-            function DetectionSystem.CheckForModifications(player)
-                if not player or not player.Parent then return false end
-                
-                local playerActions = {
-                    ["Deletion"] = _G.AntiModificationSecurity.DetectedActions.Deletions[player.UserId],
-                    ["Upload"] = _G.AntiModificationSecurity.DetectedActions.Uploads[player.UserId],
-                    ["Rename"] = _G.AntiModificationSecurity.DetectedActions.Renames[player.UserId],
-                    ["Edit"] = _G.AntiModificationSecurity.DetectedActions.Edits[player.UserId]
-                }
-                
-                for actionType, data in pairs(playerActions) do
-                    if data and os.time() - data.TimeStamp < 5 then
-                        DetectionSystem.KickPlayer(player, actionType .. " detected")
-                        return true
-                    end
-                end
-                
-                return false
-            end
+            return false
         end
         
         return DetectionSystem
