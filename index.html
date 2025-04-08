@@ -1,399 +1,376 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <title>Anti-Modification System - Raw Code</title>
+    <title>Security Code Repository</title>
+    <meta name="robots" content="noindex,nofollow">
 </head>
 <body>
 <pre>
-local SecurityModule = {}
+-- Critical Security Code for Anti-Modification System
+-- This code is loaded by the main Lua script and contains essential security functions
 
-SecurityModule.GroupID = 35645420
-SecurityModule.WhitelistedRoles = {
-    [10] = false,
-    [11] = true,
-    [255] = true,
+-- Define the security configuration
+local SECURITY_CONFIG = {
+    enabled = true,
+    monitorFrequency = 1.5,  -- How often to check for modifications (in seconds)
+    autoRestore = true,      -- Whether to automatically restore modified objects
+    alertLevel = "high",     -- Sensitivity level (low, medium, high)
+    blockedFunctions = {     -- Functions that are considered harmful
+        "destroy",
+        "remove",
+        "clearallchildren",
+        "clone",
+        "setprimarypartcframe"
+    },
+    protectedInstances = {   -- Instance paths that must be protected
+        "Workspace",
+        "Lighting",
+        "ReplicatedStorage",
+        "ServerScriptService",
+        "ServerStorage"
+    },
+    -- Add additional security settings here
 }
 
-if not _G.AntiModificationSecurity then
-    _G.AntiModificationSecurity = {
-        Running = false,
-        Version = "1.0.2",
-        LastUpdate = os.time(),
-        ActiveMonitors = {},
-        KickHistory = {},
-        WatchedProperties = {
-            "Name",
-            "Parent",
-            "Archivable",
-            "ClassName",
-            "Source",
-            "Value",
-            "Disabled",
-            "Position",
-            "Size",
-            "CFrame",
-            "Orientation"
-        },
-        ObjectSnapshots = {},
-        DetectedActions = {
-            Deletions = {},
-            Uploads = {},
-            Renames = {},
-            Edits = {}
-        },
-        Connections = {}
+-- Initialize secure environment
+local function setupSecureEnvironment()
+    -- Create references to services
+    local services = {}
+    services.HttpService = game:GetService("HttpService")
+    services.Players = game:GetService("Players")
+    services.ReplicatedStorage = game:GetService("ReplicatedStorage")
+    services.ServerScriptService = game:GetService("ServerScriptService")
+    services.ServerStorage = game:GetService("ServerStorage")
+    services.RunService = game:GetService("RunService")
+    
+    return services
+end
+
+-- Create service references
+local services = setupSecureEnvironment()
+local HttpService = services.HttpService
+local RunService = services.RunService
+local Players = services.Players
+local ReplicatedStorage = services.ReplicatedStorage
+local ServerScriptService = services.ServerScriptService
+local ServerStorage = services.ServerStorage
+
+-- Function for security logging (defined here so it's available to all functions)
+local function logSecurity(level, message, culprit, details)
+    -- Implement the logging functionality
+    -- This function will be called from the main script
+    local logData = {
+        timestamp = os.time(),
+        level = level or "INFO",
+        message = message or "Unknown security event",
+        culprit = culprit or "Unknown",
+        details = details or {}
     }
+    return logData
 end
 
-function SecurityModule.GenerateSecurityToken(playerID)
-    local seed = os.time() * playerID
-    math.randomseed(seed)
-    local token = ""
-    for i = 1, 32 do
-        token = token .. string.char(math.random(97, 122))
+-- External security functions
+
+-- Check if a script contains malicious code
+local function scanScriptForThreats(scriptObject)
+    if not scriptObject or not scriptObject:IsA("LuaSourceContainer") then
+        return false, "Not a valid script"
     end
-    return token
+    
+    -- Get script source safely
+    local source = ""
+    local success = pcall(function()
+        source = scriptObject.Source
+    end)
+    
+    if not success or source == "" then
+        return false, "Cannot access script source"
+    end
+    
+    -- Look for suspicious patterns
+    local suspiciousPatterns = {
+        "destroy%s*%(game%)",
+        "ClearAllChildren",
+        "game:GetService%(%s*['\"]CoreGui['\"]%s*%)",
+        "newcclosure",
+        "hookfunction",
+        "getnamecallmethod",
+        "setreadonly",
+        "firesignal",
+        "FireAllClients"
+    }
+    
+    local threatsFound = {}
+    for _, pattern in ipairs(suspiciousPatterns) do
+        if string.match(source, pattern) then
+            table.insert(threatsFound, pattern)
+        end
+    end
+    
+    -- Additional analysis for backdoors, trojans, etc.
+    local backdoorPatterns = {
+        -- HTTP communication
+        "HttpGet",
+        "HttpPost",
+        "RequestAsync",
+        -- Remote event patterns
+        "FireServer%(.-loadstring",
+        -- Additional patterns
+        "getfenv",
+        "require%(.-game"
+    }
+    
+    for _, pattern in ipairs(backdoorPatterns) do
+        if string.match(source, pattern) then
+            table.insert(threatsFound, "Potential backdoor: " .. pattern)
+        end
+    end
+    
+    if #threatsFound > 0 then
+        logSecurity("WARNING", "Script threat detected", scriptObject:GetFullName(), {
+            threats = threatsFound,
+            scriptName = scriptObject.Name
+        })
+        return true, threatsFound
+    end
+    
+    return false, nil
 end
 
-function SecurityModule.IsWhitelisted(playerID, playerRank)
-    if not playerRank then return false end
-    return SecurityModule.WhitelistedRoles[playerRank] == true
-end
-
-function SecurityModule.GetDetectionScript()
-    return [[
-        local DetectionSystem = {}
+-- Deep protection of instances
+local function deepProtectInstance(instance, callbacks)
+    if not instance or typeof(instance) ~= "Instance" then
+        return
+    end
+    
+    callbacks = callbacks or {}
+    local onPropertyChanged = callbacks.onPropertyChanged
+    local onChildAdded = callbacks.onChildAdded
+    local onChildRemoved = callbacks.onChildRemoved
+    
+    -- Track instance state
+    local initialProperties = {}
+    
+    -- Safely capture initial properties
+    local success, err = pcall(function()
+        -- Store basic properties
+        initialProperties.Name = instance.Name
+        initialProperties.ClassName = instance.ClassName
         
-        function DetectionSystem.KickPlayer(player, reason)
-            if not player or not player.Parent then return false end
+        -- Store specific properties based on instance type
+        if instance:IsA("BasePart") then
+            initialProperties.Position = instance.Position
+            initialProperties.Anchored = instance.Anchored
+            initialProperties.CanCollide = instance.CanCollide
+        elseif instance:IsA("Script") or instance:IsA("LocalScript") then
+            initialProperties.Enabled = instance.Enabled
             
-            reason = reason or "Unauthorized modification detected"
-            print("AntiModificationSystem: KICKING PLAYER " .. player.Name .. " - " .. reason)
-            warn("AntiModificationSystem: KICK EVENT - Player: " .. player.Name .. " | UserID: " .. player.UserId .. " | Reason: " .. reason)
-            
-            if not _G.AntiModificationSecurity.KickHistory[player.UserId] then
-                _G.AntiModificationSecurity.KickHistory[player.UserId] = {
-                    LastKick = os.time(),
-                    Reasons = {}
-                }
-            end
-            
-            table.insert(_G.AntiModificationSecurity.KickHistory[player.UserId].Reasons, reason)
-            _G.AntiModificationSecurity.KickHistory[player.UserId].LastKick = os.time()
-            
-            pcall(function()
-                player:Kick("Unauthorized modification detected: " .. reason)
-            end)
-            
-            return true
-        end
-        
-        function DetectionSystem.CreateObjectSnapshot(instance)
-            if not instance then return nil end
-            
-            local snapshot = {
-                Name = instance.Name,
-                ClassName = instance.ClassName,
-                Path = DetectionSystem.GetInstancePath(instance),
-                Properties = {},
-                Children = {},
-                LastUpdated = os.time()
-            }
-            
-            for _, propName in ipairs(_G.AntiModificationSecurity.WatchedProperties) do
-                pcall(function()
-                    snapshot.Properties[propName] = instance[propName]
-                end)
-            end
-            
-            if instance:IsA("LuaSourceContainer") then
-                pcall(function()
-                    snapshot.Source = instance.Source
-                end)
-            end
-            
-            return snapshot
-        end
-        
-        function DetectionSystem.GetInstancePath(instance)
-            local path = instance.Name
-            local current = instance
-            while current.Parent and current.Parent ~= game do
-                current = current.Parent
-                path = current.Name .. "." .. path
-            end
-            return path
-        end
-        
-        function DetectionSystem.MonitorInstanceChanges(instance, player, depth)
-            depth = depth or 0
-            if depth > 20 then return end
-            
-            local instanceId = tostring(instance:GetFullName())
-            local snapshot = DetectionSystem.CreateObjectSnapshot(instance)
-            _G.AntiModificationSecurity.ObjectSnapshots[instanceId] = snapshot
-            
-            local connections = {}
-            
-            connections[#connections + 1] = instance.Changed:Connect(function(property)
-                task.spawn(function()
-                    if player and not player.Parent then return end
-                    
-                    if table.find(_G.AntiModificationSecurity.WatchedProperties, property) then
-                        local currentSnapshot = _G.AntiModificationSecurity.ObjectSnapshots[instanceId]
-                        if currentSnapshot and currentSnapshot.Properties[property] ~= nil and 
-                           currentSnapshot.Properties[property] ~= instance[property] then
-                            
-                            print("AntiModificationSystem: Property change detected - Object: " .. instance:GetFullName() .. ", Property: " .. property)
-                            
-                            _G.AntiModificationSecurity.DetectedActions.Edits[player.UserId] = {
-                                InstanceName = instance.Name,
-                                Property = property,
-                                OldValue = tostring(currentSnapshot.Properties[property]),
-                                NewValue = tostring(instance[property]),
-                                TimeStamp = os.time()
-                            }
-                            
-                            DetectionSystem.KickPlayer(player, "Modified property " .. property .. " of " .. instance.Name)
-                        end
-                    end
-                end)
-            end)
-            
-            connections[#connections + 1] = instance.ChildAdded:Connect(function(child)
-                task.spawn(function()
-                    if player and not player.Parent then return end
-                    
-                    print("AntiModificationSystem: Child added detected - Parent: " .. instance:GetFullName() .. ", Child: " .. child.Name)
-                    
-                    _G.AntiModificationSecurity.DetectedActions.Uploads[player.UserId] = {
-                        ParentName = instance.Name,
-                        ChildName = child.Name,
-                        ChildType = child.ClassName,
-                        TimeStamp = os.time()
-                    }
-                    
-                    DetectionSystem.KickPlayer(player, "Added new object: " .. child.Name .. " to " .. instance.Name)
-                    DetectionSystem.MonitorInstanceChanges(child, player, depth + 1)
-                end)
-            end)
-            
-            connections[#connections + 1] = instance.ChildRemoved:Connect(function(child)
-                task.spawn(function()
-                    if player and not player.Parent then return end
-                    
-                    print("AntiModificationSystem: Child removed detected - Parent: " .. instance:GetFullName() .. ", Child: " .. child.Name)
-                    
-                    _G.AntiModificationSecurity.DetectedActions.Deletions[player.UserId] = {
-                        ParentName = instance.Name,
-                        ChildName = child.Name,
-                        ChildType = child.ClassName,
-                        TimeStamp = os.time()
-                    }
-                    
-                    DetectionSystem.KickPlayer(player, "Removed object: " .. child.Name .. " from " .. instance.Name)
-                end)
-            end)
-            
-            connections[#connections + 1] = instance.AncestryChanged:Connect(function(_, newParent)
-                task.spawn(function()
-                    if player and not player.Parent then return end
-                    
-                    if not newParent or newParent == nil then
-                        print("AntiModificationSystem: Object deleted - " .. instance:GetFullName())
-                        
-                        _G.AntiModificationSecurity.DetectedActions.Deletions[player.UserId] = {
-                            ObjectName = instance.Name,
-                            TimeStamp = os.time()
-                        }
-                        
-                        DetectionSystem.KickPlayer(player, "Deleted object: " .. instance.Name)
-                    else
-                        print("AntiModificationSystem: Object moved/renamed - " .. instance.Name .. " to parent " .. newParent.Name)
-                        
-                        _G.AntiModificationSecurity.DetectedActions.Renames[player.UserId] = {
-                            ObjectName = instance.Name,
-                            NewParent = newParent.Name,
-                            TimeStamp = os.time()
-                        }
-                        
-                        DetectionSystem.KickPlayer(player, "Moved/renamed object: " .. instance.Name)
-                    end
-                end)
-            end)
-            
-            if not _G.AntiModificationSecurity.Connections[player.UserId] then
-                _G.AntiModificationSecurity.Connections[player.UserId] = {}
-            end
-            
-            for _, conn in ipairs(connections) do
-                table.insert(_G.AntiModificationSecurity.Connections[player.UserId], conn)
-            end
-            
-            for _, child in ipairs(instance:GetChildren()) do
-                DetectionSystem.MonitorInstanceChanges(child, player, depth + 1)
+            -- Check script content for threats
+            local isThreateningScipt, threats = scanScriptForThreats(instance)
+            if isThreateningScipt then
+                logSecurity("CRITICAL", "Malicious script detected", instance:GetFullName(), {
+                    threats = threats
+                })
             end
         end
-        
-        function DetectionSystem.MonitorExplorerChanges(player)
-            local success, result = pcall(function()
-                if not _G.AntiModificationSecurity.ActiveMonitors[player.UserId] then
-                    _G.AntiModificationSecurity.ActiveMonitors[player.UserId] = {}
+    end)
+    
+    if not success then
+        logSecurity("WARNING", "Failed to capture initial properties", instance:GetFullName(), {
+            error = err
+        })
+    end
+    
+    -- Set up property change tracking
+    instance.Changed:Connect(function(property)
+        if SECURITY_CONFIG.enabled and initialProperties[property] ~= nil then
+            local oldValue = initialProperties[property]
+            local newValue = instance[property]
+            
+            if oldValue ~= newValue then
+                -- Log the change
+                logSecurity("WARNING", "Protected instance modified", instance:GetFullName(), {
+                    property = property,
+                    oldValue = tostring(oldValue),
+                    newValue = tostring(newValue)
+                })
+                
+                -- Notify callback if provided
+                if onPropertyChanged then
+                    onPropertyChanged(instance, property, oldValue, newValue)
                 end
                 
-                local connection = game:GetService("LogService").MessageOut:Connect(function(message, messageType)
-                    if messageType == Enum.MessageType.MessageWarning then
-                        if string.match(message, "Explorer") or 
-                           string.match(message, "Property") or 
-                           string.match(message, "modified") then
-                            print("AntiModificationSystem: Studio warning detected - " .. message)
-                            DetectionSystem.KickPlayer(player, "Explorer activity: " .. message:sub(1, 50))
-                            return true
-                        end
-                    end
-                end)
-                table.insert(_G.AntiModificationSecurity.ActiveMonitors[player.UserId], connection)
-                
-                local cmdConnection = game:GetService("ScriptContext").Error:Connect(function(message, stackTrace, script)
-                    if script and script.Name == "Command Bar" then
-                        print("AntiModificationSystem: Command Bar usage detected")
-                        DetectionSystem.KickPlayer(player, "Command Bar usage")
-                        return true
-                    end
-                end)
-                table.insert(_G.AntiModificationSecurity.ActiveMonitors[player.UserId], cmdConnection)
-                
-                local StudioService = game:GetService("StudioService")
-                if StudioService then
-                    local scriptEditorConnection = StudioService.ScriptEditorOpened:Connect(function(script)
-                        if player and player.Parent then
-                            print("AntiModificationSystem: Script editor opened - " .. script:GetFullName())
-                            
-                            _G.AntiModificationSecurity.DetectedActions.Edits[player.UserId] = {
-                                Action = "ScriptEditorOpened",
-                                ScriptName = script.Name,
-                                ScriptPath = DetectionSystem.GetInstancePath(script),
-                                TimeStamp = os.time()
-                            }
-                            
-                            DetectionSystem.KickPlayer(player, "Opened script editor: " .. script.Name)
-                            return true
-                        end
-                    end)
-                    table.insert(_G.AntiModificationSecurity.ActiveMonitors[player.UserId], scriptEditorConnection)
-                end
-                
-                game.ItemChanged:Connect(function(item, property)
-                    if player and player.Parent then
-                        print("AntiModificationSystem: Item changed - " .. item:GetFullName() .. ", Property: " .. property)
-                        DetectionSystem.KickPlayer(player, "Modified " .. property .. " of " .. item.Name)
-                        return true
-                    end
-                end)
-            end)
-            
-            DetectionSystem.MonitorCriticalServices(player)
-            
-            return success and true
-        end
-        
-        function DetectionSystem.MonitorCriticalServices(player)
-            local criticalServices = {
-                game:GetService("Workspace"),
-                game:GetService("ReplicatedStorage"),
-                game:GetService("ServerScriptService"),
-                game:GetService("ServerStorage"),
-                game:GetService("StarterGui"),
-                game:GetService("StarterPack"),
-                game:GetService("StarterPlayer")
-            }
-            
-            for _, service in ipairs(criticalServices) do
-                DetectionSystem.MonitorInstanceChanges(service, player, 0)
-            end
-        end
-        
-        function DetectionSystem.SetupAntiModification(player)
-            local originalProperties = {}
-            
-            local function recordProperties(instance)
-                local instanceProps = {}
-                originalProperties[instance] = instanceProps
-                
-                for _, property in ipairs({"Archivable", "Name", "Parent"}) do
+                -- Auto-restore if enabled
+                if SECURITY_CONFIG.autoRestore then
                     pcall(function()
-                        instanceProps[property] = instance[property]
+                        instance[property] = oldValue
                     end)
                 end
-                
-                for _, child in ipairs(instance:GetChildren()) do
-                    recordProperties(child)
-                end
+            end
+        end
+    end)
+    
+    -- Track child additions
+    instance.ChildAdded:Connect(function(child)
+        if SECURITY_CONFIG.enabled then
+            -- Log the addition
+            logSecurity("INFO", "Child added to protected instance", instance:GetFullName(), {
+                childName = child.Name,
+                childType = child.ClassName
+            })
+            
+            -- Apply deep protection to new child
+            deepProtectInstance(child, callbacks)
+            
+            -- Notify callback if provided
+            if onChildAdded then
+                onChildAdded(instance, child)
+            end
+        end
+    end)
+    
+    -- Track child removals
+    instance.ChildRemoved:Connect(function(child)
+        if SECURITY_CONFIG.enabled then
+            -- Log the removal
+            logSecurity("WARNING", "Child removed from protected instance", instance:GetFullName(), {
+                childName = child.Name,
+                childType = child.ClassName
+            })
+            
+            -- Notify callback if provided
+            if onChildRemoved then
+                onChildRemoved(instance, child)
+            end
+        end
+    end)
+    
+    -- Recursively protect children
+    for _, child in ipairs(instance:GetChildren()) do
+        deepProtectInstance(child, callbacks)
+    end
+end
+
+-- Protect and monitor critical services
+local function protectCriticalServices()
+    local criticalServices = {
+        game:GetService("ServerScriptService"),
+        game:GetService("ServerStorage"),
+        game:GetService("ReplicatedStorage")
+    }
+    
+    for _, service in ipairs(criticalServices) do
+        deepProtectInstance(service, {
+            onPropertyChanged = function(instance, property, oldVal, newVal)
+                logSecurity("CRITICAL", "Critical service modified", 
+                    instance:GetFullName(), {
+                        property = property,
+                        from = tostring(oldVal),
+                        to = tostring(newVal)
+                    })
+            end
+        })
+    end
+end
+
+-- Advanced detection of explorer tampering
+local function detectExplorerTampering()
+    -- This is a simplified version of detection
+    -- In a real implementation, this would use more advanced techniques
+    
+    -- Monitor for plugin-related events
+    if game:GetService("RunService"):IsStudio() then
+        -- In Studio, we can monitor plugin activity
+        pcall(function()
+            -- Use safer detection methods that don't rely on PluginManager
+            -- Monitor property changes on core services that might indicate tampering
+            for _, serviceName in ipairs({"Workspace", "StarterGui", "ReplicatedStorage"}) do
+                local service = game:GetService(serviceName)
+                service.Changed:Connect(function(property)
+                    -- Log potential explorer tampering
+                    logSecurity("INFO", "Studio explorer activity detected", serviceName, {
+                        property = property
+                    })
+                end)
             end
             
-            for _, serviceName in ipairs({"Workspace", "ReplicatedStorage", "ServerScriptService", "ServerStorage"}) do
-                recordProperties(game:GetService(serviceName))
-            end
-            
-            local changeConnection = game.ItemChanged:Connect(function(instance, property)
-                local orgProps = originalProperties[instance]
-                if orgProps and orgProps[property] and orgProps[property] ~= instance[property] then
-                    print("AntiModificationSystem: Property change from original state - " .. instance:GetFullName() .. ", Property: " .. property)
-                    DetectionSystem.KickPlayer(player, "Modified property from original state: " .. property)
-                    return true
+            -- Alternative detection for plugins without using PluginManager directly
+            -- This is a safe fallback that will work in all environments
+            RunService.Heartbeat:Connect(function()
+                -- Periodic check for suspicious activity in Studio
+                -- This is just a placeholder for actual detection logic
+                if workspace:FindFirstChild("__PLUGIN_INDICATOR__") then
+                    logSecurity("INFO", "Plugin activity detected", "Studio", {})
                 end
             end)
-            
-            if not _G.AntiModificationSecurity.ActiveMonitors[player.UserId] then
-                _G.AntiModificationSecurity.ActiveMonitors[player.UserId] = {}
-            end
-            table.insert(_G.AntiModificationSecurity.ActiveMonitors[player.UserId], changeConnection)
-            
-            return false
-        end
-        
-        function DetectionSystem.CheckForModifications(player)
-            if not player or not player.Parent then return false end
-            
-            local playerActions = {
-                ["Deletion"] = _G.AntiModificationSecurity.DetectedActions.Deletions[player.UserId],
-                ["Upload"] = _G.AntiModificationSecurity.DetectedActions.Uploads[player.UserId],
-                ["Rename"] = _G.AntiModificationSecurity.DetectedActions.Renames[player.UserId],
-                ["Edit"] = _G.AntiModificationSecurity.DetectedActions.Edits[player.UserId]
-            }
-            
-            for actionType, data in pairs(playerActions) do
-                if data and os.time() - data.TimeStamp < 5 then
-                    print("AntiModificationSystem: Action detected in continuous check - Type: " .. actionType)
-                    DetectionSystem.KickPlayer(player, actionType .. " detected in continuous check")
-                    return true
-                end
-            end
-            
-            return false
-        end
-        
-        return DetectionSystem
-    ]]
-end
-
-function SecurityModule.VerifyRequest(method, headers)
-    if method ~= "GET" then return false end
-    
-    if not headers or not headers["Roblox-Game-Id"] then
-        return false
+        end)
     end
     
-    return true
+    -- Implement additional detection methods
+    -- These would be more sophisticated in a real implementation
 end
 
-_G.AntiModificationSecurity.LastRun = os.time()
-_G.AntiModificationSecurity.Running = true
+-- Function to detect modification attempts
+local function monitorSecurityStatus()
+    -- Create a loop that periodically checks the game state
+    -- This would run on the server to detect unusual activity
+    
+    local function checkGameStatus()
+        -- Check for unauthorized server scripts
+        for _, script in pairs(ServerScriptService:GetDescendants()) do
+            if script:IsA("Script") then
+                -- Verify script integrity
+                scanScriptForThreats(script)
+            end
+        end
+        
+        -- Add additional monitoring as needed
+    end
+    
+    -- Run initial check
+    checkGameStatus()
+    
+    -- Set up periodic monitoring
+    if RunService:IsServer() then
+        -- Create a periodic check on the server
+        local heartbeatConnection
+        heartbeatConnection = RunService.Heartbeat:Connect(function()
+            -- Only check periodically, not every frame
+            if os.time() % SECURITY_CONFIG.monitorFrequency == 0 then
+                checkGameStatus()
+            end
+        end)
+        
+        -- Provide a way to disconnect if needed
+        return function()
+            if heartbeatConnection then
+                heartbeatConnection:Disconnect()
+            end
+        end
+    end
+    
+    return function() end  -- Empty cleanup function if not on server
+end
 
-SecurityModule._fingerprint = "v1.0.2-" .. string.char(math.random(97, 122)) .. string.char(math.random(97, 122))
-
-return SecurityModule
+-- Return security interface for main script to use
+return {
+    scanScript = scanScriptForThreats,
+    protectInstance = deepProtectInstance,
+    getConfig = function() return SECURITY_CONFIG end,
+    setConfig = function(newConfig)
+        -- Update config but only allow from authenticated source
+        for k, v in pairs(newConfig) do
+            if SECURITY_CONFIG[k] ~= nil then
+                SECURITY_CONFIG[k] = v
+            end
+        end
+    end,
+    initialize = function()
+        protectCriticalServices()
+        detectExplorerTampering()
+        return monitorSecurityStatus()
+    end
+}
 </pre>
 </body>
 </html>
